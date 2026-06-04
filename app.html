@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart KOT Priority Dashboard (HRRN)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans p-6">
+
+
+    <header class="max-w-7xl mx-auto mb-8 border-b border-slate-800 pb-6">
+        <h1 class="text-3xl font-extrabold tracking-tight text-emerald-400">Smart KOT Dispatcher</h1>
+        <p class="text-slate-400 mt-2 text-sm max-w-2xl">
+            This dashboard uses the <strong>Highest Response Ratio Next (HRRN)</strong> scheduling algorithm to sort tickets. 
+            Priority scales dynamically using the aging formula: <code class="text-amber-400 bg-slate-950 px-2 py-0.5 rounded text-xs">RR = (Wait Time + Prep Time) / Prep Time</code>.
+        </p>
+    </header>
+
+
+    <main class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
+
+        <section class="bg-slate-800/50 border border-slate-800 rounded-xl p-6 h-fit">
+            <h2 class="text-xl font-bold mb-4 text-slate-200">Simulate New KOT</h2>
+            <form id="kotForm" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Table Number</label>
+                    <input type="text" id="tableNum" required placeholder="e.g., Table 4" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 text-slate-200">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Dish Name</label>
+                    <input type="text" id="dishName" required placeholder="e.g., Grilled Salmon" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 text-slate-200">
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">Est. Cook Time (Minutes)</label>
+                    <input type="number" id="prepTime" required min="1" max="60" placeholder="e.g., 15" class="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 text-slate-200">
+                </div>
+                <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2 rounded-lg text-sm transition-colors cursor-pointer">
+                    Send to Kitchen
+                </button>
+            </form>
+
+            <div class="mt-6 pt-6 border-t border-slate-800">
+                <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Simulation Engine Status</h3>
+                <div class="flex items-center space-x-2 bg-slate-950 p-3 rounded-lg border border-slate-800">
+                    <span class="relative flex h-2 w-2">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                    </span>
+                    <span class="text-xs text-slate-400">Simulation Time Speeding up: <span class="text-amber-400 font-mono">1s real-time = 1 min wait time</span></span>
+                </div>
+            </div>
+        </section>
+
+
+        <section class="lg:col-span-2 space-y-6">
+
+            <div>
+                <h2 class="text-xl font-bold mb-3 text-slate-200 flex items-center justify-between">
+                    <span>🔥 Next Up (Highest Priority)</span>
+                    <span id="queueCount" class="text-xs bg-slate-800 text-slate-400 px-2.5 py-1 rounded-full">0 Orders Waiting</span>
+                </h2>
+
+
+                <div id="queueContainer" class="space-y-3 min-h-[150px] transition-all">
+
+                    <div id="emptyState" class="text-center py-12 border border-dashed border-slate-800 rounded-xl text-slate-500 text-sm">
+                        No pending tickets. The kitchen is clear!
+                    </div>
+                </div>
+            </div>
+
+
+            <div>
+                <h2 class="text-md font-semibold text-slate-400 mb-2">Served Performance Analytics</h2>
+                <div class="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden text-xs">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-900 text-slate-400 border-b border-slate-800">
+                                <th class="p-3">Order</th>
+                                <th class="p-3">Est. Cook Time</th>
+                                <th class="p-3">Total Wait Time</th>
+                                <th class="p-3">Final Priority Ratio</th>
+                            </tr>
+                        </thead>
+                        <tbody id="analyticsBody" class="divide-y divide-slate-900 text-slate-300">
+
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        let tickets = [];
+        let servedLog = [];
+        let ticketIdCounter = 1;
+
+        const form = document.getElementById('kotForm');
+        const queueContainer = document.getElementById('queueContainer');
+        const analyticsBody = document.getElementById('analyticsBody');
+        const queueCount = document.getElementById('queueCount');
+
+
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            
+            const tableNum = document.getElementById('tableNum').value;
+            const dishName = document.getElementById('dishName').value;
+            const prepTime = parseFloat(document.getElementById('prepTime').value);
+
+
+            const newTicket = {
+                id: ticketIdCounter++,
+                table: tableNum,
+                dish: dishName,
+                prepTime: prepTime,    
+                waitTime: 0,          
+                responseRatio: 1.0     
+            };
+
+            tickets.push(newTicket);
+            form.reset();
+            updateDashboard();
+        });
+
+       
+        function runHRRNEngine() {
+            if (tickets.length === 0) return;
+
+            
+            tickets.forEach(ticket => {
+                ticket.waitTime += 1;
+                
+                
+                ticket.responseRatio = (ticket.waitTime + ticket.prepTime) / ticket.prepTime;
+            });
+
+            
+            tickets.sort((a, b) => b.responseRatio - a.responseRatio);
+            
+            updateDashboard();
+        }
+
+        
+        function serveTicket(id) {
+            const index = tickets.findIndex(t => t.id === id);
+            if (index !== -1) {
+                const completed = tickets.splice(index, 1)[0];
+                servedLog.unshift(completed); 
+                updateDashboard();
+                renderAnalytics();
+            }
+        }
+
+       
+        function updateDashboard() {
+            
+            queueCount.textContent = `${tickets.length} Orders Waiting`;
+
+            if (tickets.length === 0) {
+                queueContainer.innerHTML = `
+                    <div id="emptyState" class="text-center py-12 border border-dashed border-slate-800 rounded-xl text-slate-500 text-sm">
+                        No pending tickets. The kitchen is clear!
+                    </div>`;
+                return;
+            }
+
+             
+            queueContainer.innerHTML = tickets.map((ticket, index) => {
+                
+                let urgencyColor = 'border-slate-800 bg-slate-900/40 text-slate-100';
+                if (ticket.responseRatio > 2.5) {
+                    urgencyColor = 'border-rose-900/60 bg-rose-950/20 text-rose-200';
+                } else if (ticket.responseRatio > 1.6) {
+                    urgencyColor = 'border-amber-900/60 bg-amber-950/20 text-amber-200';
+                }
+
+                
+                const isTopPriority = index === 0;
+
+                return `
+                    <div class="border p-4 rounded-xl flex items-center justify-between transition-all duration-500 ${urgencyColor} ${isTopPriority ? 'ring-2 ring-emerald-500/50 border-emerald-500/30' : ''}">
+                        <div class="space-y-1">
+                            <div class="flex items-center space-x-2">
+                                <span class="font-mono text-xs px-2 py-0.5 bg-slate-950/80 rounded font-semibold text-slate-400 border border-slate-800">${ticket.table}</span>
+                                <span class="font-bold text-base tracking-tight">${ticket.dish}</span>
+                                ${isTopPriority ? '<span class="text-[10px] uppercase tracking-wider font-extrabold bg-emerald-500 text-slate-950 px-1.5 py-0.5 rounded animate-pulse">Next Up</span>' : ''}
+                            </div>
+                            <div class="flex items-center space-x-4 text-xs text-slate-400 font-mono pt-1">
+                                <span>Est. Cook: <strong class="text-slate-200">${ticket.prepTime}m</strong></span>
+                                <span>Waited: <strong class="text-slate-200">${ticket.waitTime}m</strong></span>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-4">
+                            <div class="text-right">
+                                <div class="text-xs uppercase tracking-wider font-bold text-slate-500">Priority Ratio</div>
+                                <div class="font-mono text-lg font-bold ${isTopPriority ? 'text-emerald-400' : 'text-amber-400'}">${ticket.responseRatio.toFixed(2)}x</div>
+                            </div>
+                            <button onclick="serveTicket(${ticket.id})" class="bg-slate-950 hover:bg-emerald-600 border border-slate-700 hover:border-emerald-500 p-2 text-xs font-semibold rounded-lg tracking-wide cursor-pointer transition-all">
+                                Serve Dish
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        
+        function renderAnalytics() {
+            analyticsBody.innerHTML = servedLog.map(log => `
+                <tr class="hover:bg-slate-900/50 transition-colors">
+                    <td class="p-3 font-semibold">${log.table} — <span class="text-slate-400 font-normal">${log.dish}</span></td>
+                    <td class="p-3 font-mono text-slate-400">${log.prepTime} mins</td>
+                    <td class="p-3 font-mono text-slate-400">${log.waitTime} mins</td>
+                    <td class="p-3 font-mono font-bold text-emerald-400">${log.responseRatio.toFixed(2)}x</td>
+                </tr>
+            `).join('');
+        }
+
+       
+        setInterval(runHRRNEngine, 1500);
+    </script>
+</body>
+</html>
